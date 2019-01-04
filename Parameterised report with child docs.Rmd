@@ -1,0 +1,211 @@
+---
+title: "Parameterised Report with child documents"
+author: "Mike K Smith"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+params: 
+  endpoint: 
+    value: HAMDTL17
+    choices:
+      - HAMDTL17
+      - HAMATOTL
+      - PGIIMP
+  quantAudience: FALSE
+output:
+  html_document:
+    df_print: paged
+    toc: TRUE
+    toc_float: TRUE
+    toc_depth: 4
+    code_download: TRUE
+  word_document: default
+  pdf_document: default
+---
+
+```{r, echo = FALSE, results = "hide"}
+## Hide code if we're not rendering the report for a quantitative audience.
+if(!params$quantAudience)knitr::opts_chunk$set(echo = FALSE, warning=FALSE)
+```
+
+```{r loadTidyverse, warnings = FALSE, results="hide", message=FALSE, echo=FALSE}
+library(tidyverse)
+library(broom.mixed)
+library(nlme)
+```
+
+# Data Source
+We're using a publically available dataset on depression. 
+  
+  * The data is from https://missingdata.lshtm.ac.uk/category/dia-working-group/example-data-sets/
+(Website accessed 05 June 2018).  
+  * The associated manuscript is https://www.ncbi.nlm.nih.gov/pubmed/15232330.  
+  
+```{r DataManipulation, results="hide", message=FALSE, warnings=FALSE}
+data <- haven::read_sas("chapter15_example.sas7bdat")
+
+data <- data %>%
+  rename_all(funs(
+    str_replace(string = ., pattern=params$endpoint, replacement="outcome")
+  )) %>%
+  bind_cols(data,.) %>%
+  drop_na()
+```
+
+```{r Show_data, eval = params$quantAudience}
+data %>%
+  head(10)
+```
+
+```{r DataManipulationChildDoc, eval=params$quantAudience, child="DataManipulation_text.Rmd"}
+```
+
+# Outcomes
+There are three outcomes in the dataset:   
+  
+  * HAM-D 17 item rating (`HAMDTL17`)  
+  * Hamilton Anziety Rating Scale (`HAMATOTL`)  
+  * Physician rating of global improvement (`PGIIMP`)  
+  
+This report summarises `r params$endpoint`.
+
+# Exploratory data analysis
+There are `r length(unique(data$PATIENT))` subjects in the dataset. Endpoints
+are measured on four visits ranging from `r min(data$RELDAYS)` days to 
+`r max(data$RELDAYS)` days. 
+
+## Summary Statistics
+The table below shows mean `r params$endpoint` by THERAPY and VISIT.
+  
+```{r data_summary}
+data %>%
+  group_by(THERAPY, VISIT) %>%
+  summarise(n = n(),
+            mean = mean(outcome),
+            sd = sd(outcome),
+            range = paste(
+              min(outcome), 
+              "-",
+              max(outcome)
+            ))
+```
+  
+## Visualisation  
+  
+```{r graphical_EDA}
+data <- data %>%
+  mutate(WEEK = floor(RELDAYS/7))
+
+ggplot(data = data, aes(x=jitter(WEEK), y=outcome, group=THERAPY, colour=THERAPY)) +
+  geom_point(alpha=0.25) + 
+  geom_smooth(method=lm) +
+  labs(title=paste(params$endpoint,"by study week"),
+       x="Week",
+       y=params$endpoint) + 
+  theme(legend.position = "bottom")
+```
+  
+# Analysis
+We fit a linear model to the change in `r params$endpoint` over time using baseline as a 
+covariate and look for difference in slope.
+
+```{r linearModel}
+data <- data %>%
+  mutate(THERAPY = factor(THERAPY,
+                          levels = c("PLACEBO","DRUG"))) 
+  
+fit <- lme(outcome ~ basval + RELDAYS, 
+           data=data, 
+           random = ~1 + RELDAYS | PATIENT,
+           method = "ML",
+           na.action = na.omit)
+
+fit2 <- lme(outcome ~ basval + RELDAYS + THERAPY, 
+           data=data, 
+           random = ~1 | PATIENT,
+           method = "ML",
+           na.action = na.omit)
+
+fit3 <- lme(outcome ~ basval + RELDAYS + THERAPY, 
+           data=data, 
+           random = ~1 + RELDAYS | PATIENT,
+           method = "ML",
+           na.action = na.omit)
+
+modelComparison <- anova(fit, fit2, fit3)
+
+# Show comparison between models only if rendering for a quantitative audience
+if(params$quantAudience) print(modelComparison)
+
+pValue <- as.numeric(modelComparison$`p-value`)
+signif <- pValue < 0.05
+bestModel <- sum(signif, na.rm=TRUE)+1
+bestFit <- eval(parse(text = glue::glue("fit{bestModel}")))
+
+broom.mixed::tidy(bestFit)
+```
+
+## Model Predictions
+```{r model_predictions, out.width="100%"}
+predData <- data %>%
+            mutate(pred = predict(bestFit,level = 0),
+                   ipred = predict(bestFit,level = 1))
+
+predData<- predData %>%
+  group_by(THERAPY, WEEK) %>%
+  summarise(MEAN = mean(outcome),
+            pred = mean(pred),
+            ipred = mean(ipred),
+            STD = sd(outcome),
+            N = n()) %>%
+  filter( N > 1 ) %>%
+  mutate(SE = (STD/sqrt(N)),
+         LOWER = MEAN - 1.96*SE,
+         UPPER = MEAN + 1.96*SE) 
+
+ggplot(data = predData, aes(x = WEEK, y = MEAN, group=THERAPY, colour=THERAPY)) +
+    facet_grid( ~ THERAPY) +
+    geom_point() +
+    geom_line() +
+    geom_line(aes(x = WEEK, y = pred), colour = "red") + 
+    geom_linerange(aes(x = WEEK, ymin = LOWER, ymax = UPPER)) +
+    labs(title = glue::glue("Mean {params$endpoint} with CIs + mean population predictions")) +
+    theme(legend.position = "bottom")
+
+ggplot(data = predData, aes(x = WEEK, y = MEAN, group=THERAPY, colour=THERAPY)) +
+    facet_grid( ~ THERAPY) +
+    geom_point() +
+    geom_line() +
+    geom_line(aes(x = WEEK, y = ipred), colour = "red") + 
+    geom_linerange(aes(x = WEEK, ymin = LOWER, ymax = UPPER)) +
+    labs(title = glue::glue("Mean {params$endpoint} with CIs + mean individualised predictions")) +
+    theme(legend.position = "bottom")
+```
+
+```{r ModelDiagnosticsChildDoc, eval=params$quantAudience, child="ModelDiagnostics_text.Rmd"}
+```
+
+```{r ModelDiagnostics_show, eval=params$quantAudience}
+broom.mixed::augment(bestFit) %>%
+  ggplot(data=., aes(x=outcome, y=.fitted, group=THERAPY, colour=THERAPY)) +
+  geom_point() + 
+  geom_abline(colour="red")
+
+broom.mixed::augment(bestFit) %>%
+  ggplot(data=., aes(x=outcome, y=.resid, group=THERAPY, colour=THERAPY)) +
+  geom_point() + 
+  geom_hline(aes(yintercept=0),colour="red")
+
+broom.mixed::augment(bestFit) %>%
+  ggplot(data=., aes(x=RELDAYS, y=.resid, group=THERAPY, colour=THERAPY)) +
+  geom_point() + 
+  geom_hline(aes(yintercept=0),colour="red")
+```
+---
+
+# Appendix 1 - Session information
+```{r sessionInfo}
+sessionInfo()
+```
+
+```{r Code_appendix_show, eval=params$quantAudience, child = "Appendix2.Rmd", message = FALSE}
+```
+

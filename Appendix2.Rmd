@@ -1,0 +1,5 @@
+---
+
+# Appendix 2 - Code used in creation of this report
+```{r, ref.label=knitr::all_labels(),echo=TRUE, eval=FALSE}
+```

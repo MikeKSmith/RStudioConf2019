@@ -1,0 +1,20 @@
+## Data Manipulations
+
+The data shows post-baseline measurements for subjects on duloxetine and placebo 
+(+paroxetine). Although two doses of duloxetine were given in the study
+the data has been "anonymised" by randomly sampling from the two different doses.
+
+## Conditional execution of Data Manipulation.
+If you see the section named `Data Manipulation` above, then 
+this is a separate child document that documents the tasks taken to read in a 
+prepare the data for analysis. We can control appearance
+of this section - in this case it only appears if we choose to show aspects of
+the report that might be of interest to quantitative reviewers.
+
+## Renaming of the endpoint variable
+Each outcome variable is a column in the dataset (tidy principles!) and to make
+the report work well with parameterisation, we rename this in the initial
+data manipulation to "outcome" so that subsequent tasks can be written 
+generically. Alternatively, we could condition on the endpoint selected to 
+perform different actions for each, without renaming - for example, if we had
+continuous and categorical outcomes.

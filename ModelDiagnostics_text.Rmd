@@ -1,0 +1,4 @@
+## Model Diagnostics
+Similarly to the Data Manipulation section above, this section will only appear
+if we choose to render the report for quantitative reviewers using the 
+`quantAudience` parameter.
